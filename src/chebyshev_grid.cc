@@ -5,58 +5,175 @@ namespace Interpolation
 {
 namespace Chebyshev
 {
-    StandardGrid::StandardGrid(size_t p)
-    {
-        _p = p;
 
-        for (size_t j = 0; j <= p; j++){
-            _tj.push_back(cos(j * M_PI / static_cast<double>(p)));
-        } 
+double get_chebyshev_lobatto_point(size_t j, size_t p)
+{
+    if (j > p) {
+        throw std::domain_error("[get_chebyshev_lobatto_point]: j>p is not valid");
+    }
+    double jd = static_cast<double>(j);
+    double pd = static_cast<double>(p);
 
-        for (size_t j = 0; j <= p; j++) {
-            double sign = j == 0 % 2 ? +1 : -1;
-            double scaling;
-            if (j==0 || j == p) scaling = 0.5;
-            _betaj.push_back(sign * scaling);
-        }
+    return cos(jd * M_PI / pd);
+}
 
-        _Dij.resize(_p + 1, vector_d(_p+1, 0.));
-        _Dij[0][0] = (2. * _p * _p + 1) / 6.;
-        _Dij[_p][_p] = -_Dij[0][0];
-
-        for(size_t j=1; j<p; j++) {
-            _Dij[j][j] = -0.5 * _tj[j] / (1. - pow(_tj[j], 2));
-        }
-
-        for (size_t i = 0; i <= p; i++) {
-            for (size_t j = 0; j <= p; j++) {
-                if (j == i) continue;
-                _Dij[i][j] = -(_betaj[i] / _betaj[j]) / (_tj[i] - _tj[j]);
-            }
-        }
+StandardGrid::StandardGrid(size_t p)
+    : _p(p), _tj(_p+1, 0), _betaj(p+1, 1), _Dij(_p+1, vector_d(_p+1, 0))
+{
+    _betaj[0] = 0.5;
+    _betaj[p] = 0.5;
+    for (size_t j = 0; j <= _p; j++) {
+        _tj[j]    = get_chebyshev_lobatto_point(j, _p);
+        _betaj[j] *= (j % 2 == 0 ? 1 : -1);
     }
 
+    _Dij[0][0] = (2 * _p * _p + 1) / 6;
+    _Dij[p][p] = -((2 * _p * _p + 1) / 6);
+    for (size_t j = 1; j < _p; j++) {
+        _Dij[j][j] = (-_tj[j]) / (2.0 * (1.0 - _tj[j] * _tj[j]));
+    }
+    for (size_t j = 0; j <= _p; j++) {
+        for (size_t k = 0; k < j; k++) {
+            _Dij[j][k] = -(_betaj[j] / _betaj[k]) / (_tj[j] - _tj[k]);
+        }
+        for (size_t k = j+1; k <= _p; k++) {
+            _Dij[j][k] = -(_betaj[j] / _betaj[k]) / (_tj[j] - _tj[k]);
+        }
+    }
+}
 
 double StandardGrid::interpolate(double t, const vector_d &fj, size_t start, size_t end) const
 {
-    if(t<-1 || t>1){
-        throw std::domain_error("StandardGrid::interpolate t must be in [-1,1]");
-    }
-    if (end - start != _p) {
-        throw std::domain_error("StandardGrid::interpolate end-start should be equal to p");
+    if (t < -1 || t > 1 || (end - start) != _p) {
+        throw std::domain_error("[StandardGrid::interpolate]: t = " + std::to_string(t)
+                                + " \\notin [-1, +1] OR view "
+                                + "into fj of wrong size: ["
+                                + std::to_string(start) + ", " + std::to_string(end) + "]");
     }
 
-    double den =0.;
-    for (size_t j=0; j <= _p; j++) {
-        if (t == _tj[j]) return fj[j + start] 
-        den += _betaj[j] / (t - _tj[j]);
+    double den = 0;         // calculate the denominator of Eq.(66) 
+    for (size_t l = 0; l <= _p; l++) {
+        if (fabs(t - _tj[l]) < 1.0e-15) return fj[l + start];
+        den += _betaj[l] / (t - _tj[l]);
     }
- 
-}    double res = 0.;
-    for (size_t i=0; i <= _p; i++)
-{
-    
+
+    double sum = 0;
+    for (size_t i = start, j = 0; i <= end; i++, j++) {
+        sum += poli_weight(t, j, den) * fj[i];
+    }
+    return sum;
 }
+
+double StandardGrid::interpolate_der(double t, const vector_d &fj, size_t start, size_t end) const
+{
+    if (t < -1 || t > 1 || (end - start) != _p) {
+        throw std::domain_error("[StandardGrid::interpolate_der]: t = " + std::to_string(t)
+                                + " \\notin [-1, +1] OR view "
+                                + "into fj of wrong size: ["
+                                + std::to_string(start) + ", " + std::to_string(end) + "]");
+    }
+
+    double den = 0;
+    for (size_t l = 0; l <= _p; l++) {
+        if (fabs(t - _tj[l]) < 1.0e-15) {
+            double sum = 0;
+            for (size_t i = start, j = 0; i <= end; i++, j++) {
+                sum += fj[i] * _Dij[j][l];
+            }
+            return sum;
+        }
+        den += _betaj[l] / (t - _tj[l]);
+    }
+
+    double sum = 0;
+    for (size_t i = start, j = 0; i <= end; i++, j++) {
+        sum += poli_weight_der(t, j, den) * fj[i];
+    }
+    return sum;
+}
+
+double StandardGrid::poli_weight(double t, size_t j) const
+{
+    if (t < -1 || t > 1) {
+        throw std::domain_error("[StandardGrid::poli_weight]: t = " + std::to_string(t) 
+                                + " \\notin [-1, +1]");
+    }
+    if (fabs(t - _tj[j]) < 1.0e-15) return 1.0;
+
+    double den = 0;
+    for (size_t l = 0; l <= _p; l++) {
+        if (fabs(t - _tj[l]) < 1.0e-15) return 0.0;
+
+        den += _betaj[l] / (t - _tj[l]);
+    }
+
+    return _betaj[j] / den / (t - _tj[j]);
+}
+
+double StandardGrid::poli_weight(double t, size_t j, double den) const
+{
+    if (t < -1 || t > 1) {
+        throw std::domain_error("[StandardGrid::poli_weight]: t = " + std::to_string(t) 
+                                + " \\notin [-1, +1]");
+    }
+    if (fabs(t - _tj[j]) < 1.0e-15) return 1.0;
+
+    return _betaj[j] / den / (t - _tj[j]);
+}
+
+double StandardGrid::poli_weight_der(double t, size_t j) const
+{
+    if (t < -1 || t > 1) {
+        throw std::domain_error("[StandardGrid::poli_weight_der]: t = " + std::to_string(t) 
+                                + " \\notin [-1, +1]");
+    }
+    double res = 0;
+    for (size_t i = 0; i <= _p; i++) {
+        if (fabs(t - _tj[i]) < 1.0e-15) return _Dij[j][i];
+        res += _Dij[j][i] * poli_weight(t, i);
+    }
+    return res;
+}
+
+double StandardGrid::poli_weight_der(double t, size_t j, double den) const
+{
+    if (t < -1 || t > 1) {
+        throw std::domain_error("[StandardGrid::poli_weight_der]: t = " + std::to_string(t) 
+                                + " \\notin [-1, +1]");
+    }
+    double res = 0;
+    for (size_t i = 0; i <= _p; i++) {
+        if (fabs(t - _tj[i]) < 1.0e-15) return _Dij[j][i];
+        res += _Dij[j][i] * poli_weight(t, i, den);
+    }
+    return res;
+}
+
+void StandardGrid::apply_D(vector_d &fj, size_t start, size_t end) const
+{
+    if (end - start != _p) {
+        throw std::invalid_argument("[StandardGrid::apply_D]: cannot apply "
+                                    "derivative matrix to partial vector.");
+    }
+    vector_d temp((end - start + 1), 0.);
+    for (size_t i = 0; i <= _p; i++){
+        for (size_t j = 0, k = start; k <= end; k++, j++) {
+            temp[i] += _Dij[j][i] * fj[k];
+        }
+    }
+
+    for (size_t i = start; i <= end; i++) {
+        fj[i] = temp[i - start];
+    }
+}
+
+vector_d StandardGrid::discretize(const std::function<double(double)> &fnc) const // function returns object "result" of class "vector_d = std::vector<double>". We use vector_d as alias for std::vector<double>.
+{
+    vector_d result(_p + 1, 0.);
+    for (size_t i = 0; i <= _p; i++) {
+        result[i] = fnc(_tj[i]);
+    }
+    return result;
 }
 
 } // namespace Chebyshev
