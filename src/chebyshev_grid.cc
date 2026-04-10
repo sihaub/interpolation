@@ -1,4 +1,5 @@
 #include "Interpolation/chebyshev_grid.hh"
+#include <stdexcept>
 
 namespace Interpolation
 {
@@ -19,11 +20,9 @@ namespace Chebyshev
             _betaj.push_back(sign * scaling);
         }
 
-        _Dij.resize(p+1, vector_d(p+1, 0.));
-        // D is a vector of dimensions p+1 OF vectors of 
-        // dimensions p+1 OF zeros
-        _Dij[0][0] = (2. * p * p + 1) / 6.;
-        _Dij[p][p] = -_Dij[0][0];
+        _Dij.resize(_p + 1, vector_d(_p+1, 0.));
+        _Dij[0][0] = (2. * _p * _p + 1) / 6.;
+        _Dij[_p][_p] = -_Dij[0][0];
 
         for(size_t j=1; j<p; j++) {
             _Dij[j][j] = -0.5 * _tj[j] / (1. - pow(_tj[j], 2));
@@ -36,5 +35,29 @@ namespace Chebyshev
             }
         }
     }
+
+
+double StandardGrid::interpolate(double t, const vector_d &fj, size_t start, size_t end) const
+{
+    if(t<-1 || t>1){
+        throw std::domain_error("StandardGrid::interpolate t must be in [-1,1]");
+    }
+    if (end - start != _p) {
+        throw std::domain_error("StandardGrid::interpolate end-start should be equal to p");
+    }
+
+    double den =0.;
+    for (size_t j=0; j <= _p; j++) {
+        if (t == _tj[j]) return fj[j + start] 
+        den += _betaj[j] / (t - _tj[j]);
+    }
+ 
+}    double res = 0.;
+    for (size_t i=0; i <= _p; i++)
+{
+    
+}
+}
+
 } // namespace Chebyshev
 } // namespace Interpolation
