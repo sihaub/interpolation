@@ -35,7 +35,7 @@ struct StandardGrid {
     * @brief Construct a new Standard Grid object from an input routine
     *
     * @param fnc The routine to produce the grid points, as function of the
-    *            index and the total number of points
+    *            index and the total number of points --> (size_t, size_t)
     * @param N The degree of the interpolating polynomial (total # of points = p+1)
     *
     * @note It expects that the lower bound is -1 and the upper bound +1
